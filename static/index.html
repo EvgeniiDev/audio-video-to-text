@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>giga-transcribe</title>
+<style>
+:root { color-scheme: dark; --bg:#14161a; --card:#1e2126; --acc:#7cc4ff; --ok:#7dffa8; --err:#ff8a8a; }
+* { box-sizing: border-box; }
+body { background:var(--bg); color:#e8e8e8; font:16px/1.5 system-ui,sans-serif; max-width:760px; margin:0 auto; padding:24px 16px 64px; }
+h1 { font-size:22px; font-weight:600; }
+#drop { border:2px dashed #444; border-radius:12px; padding:40px 20px; text-align:center; color:#999; cursor:pointer; transition:.15s; }
+#drop:hover, #drop.over { border-color:var(--acc); color:var(--acc); background:#1a222c; }
+.job { background:var(--card); border-radius:10px; padding:14px 16px; margin-top:12px; }
+.job .top { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+.job .name { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.job .st { font-size:13px; color:#aaa; white-space:nowrap; }
+.bar { height:6px; background:#333; border-radius:3px; margin:10px 0; overflow:hidden; }
+.bar > div { height:100%; background:var(--acc); width:0%; transition:width .5s; border-radius:3px; }
+.job.done .bar > div { background:var(--ok); }
+.job.error .st { color:var(--err); }
+.preview { font-size:14px; color:#bbb; max-height:7.5em; overflow:hidden; margin:8px 0; white-space:pre-wrap; }
+.btns a { display:inline-block; margin-right:8px; padding:4px 12px; border:1px solid #444; border-radius:6px; color:var(--acc); text-decoration:none; font-size:14px; }
+.btns a:hover { border-color:var(--acc); }
+.hint { color:#666; font-size:13px; margin-top:16px; }
+</style>
+</head>
+<body>
+<h1>🎙 giga-transcribe <span style="color:#666;font-weight:400;font-size:14px">GigaAM v3</span></h1>
+<div id="drop">Перетащи видео или аудио сюда<br><span style="font-size:13px">mp4 · mkv · mp3 · wav · m4a · ogg</span></div>
+<div id="jobs"></div>
+<p class="hint">Час видео на CPU — примерно 2–4 часа. Страницу можно закрывать, задачи живут на сервере.</p>
+<script>
+const drop = document.getElementById('drop'), box = document.getElementById('jobs');
+const input = Object.assign(document.createElement('input'), {type:'file', accept:'video/*,audio/*', hidden:true});
+document.body.appendChild(input);
+drop.onclick = () => input.click();
+['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.add('over');}));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.remove('over');}));
+drop.addEventListener('drop', ev => [...ev.dataTransfer.files].forEach(send));
+input.onchange = () => [...input.files].forEach(send);
+async function send(file) {
+  const fd = new FormData(); fd.append('f', file);
+  const r = await fetch('/upload', {method:'POST', body:fd});
+  if (!r.ok) { alert('Ошибка: ' + await r.text()); return; }
+  render(await r.json());
+}
+async function render(j) {
+  let el = document.getElementById('j'+j.id);
+  if (!el) { el = document.createElement('div'); el.id = 'j'+j.id; el.className = 'job'; box.prepend(el); }
+  const r = await (await fetch('/jobs/'+j.id)).json();
+  el.className = 'job ' + (r.status === 'done' ? 'done' : r.status === 'error' ? 'error' : '');
+  const st = {queued:'в очереди', decoding:'декодирую…', transcribing:`${r.progress}% · фраз: ${r.phrases}`, done:`готово · фраз: ${r.phrases}`, error:'ошибка: '+r.error}[r.status] || r.status;
+  el.innerHTML = `<div class="top"><span class="name">${esc(j.filename)}</span><span class="st">${esc(st)}</span></div>
+    <div class="bar"><div style="width:${r.status==='done'?100:r.progress}%"></div></div>
+    ${r.preview ? `<div class="preview">${esc(r.preview)}</div>` : ''}
+    ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a></div>` : ''}`;
+  if (r.status !== 'done' && r.status !== 'error') setTimeout(() => render(j), 2000);
+}
+function esc(s){return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+fetch('/jobs').then(r => r.json()).then(js => js.forEach(render));
+</script>
+</body>
+</html>

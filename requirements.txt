@@ -1,0 +1,10 @@
+# GigaAM itself is installed from the cloned repo (editable).
+# See README for setup. Runtime deps of this service:
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9   # file uploads
+soundfile>=0.12
+numpy>=1.26
+torch>=2.8.0
+torchaudio>=2.8.0
+# gigaam: pip install -e ./GigaAM  (clone https://github.com/salute-developers/GigaAM)
