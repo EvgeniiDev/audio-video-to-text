@@ -1,9 +1,3 @@
-"""VAD segmentation for files via Silero VAD (snakers4/silero-vad).
-
-Takes mono float32 16 kHz audio of ANY length, yields
-(start_sec, end_sec, samples) per speech phrase. Model is loaded once
-(weights bundled in the pip package, works offline) and reused.
-"""
 from __future__ import annotations
 
 import threading
@@ -17,7 +11,6 @@ _model_lock = threading.Lock()
 
 
 def get_vad_model():
-    """Silero VAD model, lazy singleton (thread-safe)."""
     global _model
     if _model is None:
         with _model_lock:
@@ -29,7 +22,6 @@ def get_vad_model():
 
 
 def phrase_dbfs(audio: np.ndarray) -> float:
-    """Level of a phrase in dBFS (for silence filtering)."""
     rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)) + 1e-10)
     return 20.0 * np.log10(rms)
 
@@ -43,8 +35,6 @@ def speech_timestamps(
     pad_sec: float = 0.2,
     max_segment: float = 25.0,
 ) -> list[tuple[float, float]]:
-    """Speech regions as (start_sec, end_sec). Input length is unlimited:
-    Silero iterates internally in ~32 ms windows with O(n) time."""
     import torch
     from silero_vad import get_speech_timestamps
 
@@ -52,7 +42,7 @@ def speech_timestamps(
         raise ValueError(f"Silero VAD needs {SAMPLE_RATE} Hz, got {sample_rate}")
     model = get_vad_model()
     wav = torch.from_numpy(np.ascontiguousarray(samples, dtype=np.float32))
-    with _model_lock:  # JIT model holds recurrent state; serialize access
+    with _model_lock:
         model.reset_states()
         with torch.inference_mode():
             ts = get_speech_timestamps(
@@ -74,13 +64,6 @@ def segment(
     max_segment: float = 25.0,
     **kwargs,
 ) -> tuple[float, float, np.ndarray]:
-    """Split mono float32 audio into speech phrases.
-
-    Yields (start_sec, end_sec, audio) tuples. Same interface as the old
-    EnergyVAD segmenter, so engine.py needs no changes. Extra kwargs
-    (block_sec, silence_hangover, ...) are accepted and ignored for
-    backward compatibility.
-    """
     for start, end in speech_timestamps(samples, sample_rate, max_segment=max_segment):
         s0, s1 = int(start * sample_rate), int(end * sample_rate)
         yield (start, end, samples[s0:s1])

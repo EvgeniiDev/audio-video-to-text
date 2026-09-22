@@ -1,9 +1,3 @@
-"""Transcription engine: ffmpeg decode -> VAD phrases -> GigaAM.
-
-Model is loaded once (warm) and reused across jobs. GigaAM package comes
-from the salute-developers/GigaAM repo (pip install -e ./GigaAM).
-Same model call as qwen_talker Transcriber: v3_e2e_ctc gives punctuation.
-"""
 from __future__ import annotations
 
 import logging
@@ -12,7 +6,6 @@ import threading
 from dataclasses import dataclass, field
 
 import numpy as np
-import soundfile as sf  # noqa: F401 - kept as engine dep hint
 
 from .vad import phrase_dbfs, segment
 
@@ -23,7 +16,6 @@ MODEL_NAME = "v3_e2e_ctc"
 
 
 def decode_audio(path: str) -> np.ndarray:
-    """Any audio/video -> mono float32 16 kHz via ffmpeg."""
     proc = subprocess.run(
         ["ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", str(SAMPLE_RATE),
          "-f", "f32le", "-acodec", "pcm_f32le", "-"],
@@ -43,7 +35,7 @@ class Phrase:
 class Job:
     id: str
     filename: str
-    status: str = "queued"  # queued|decoding|transcribing|done|error
+    status: str = "queued"
     phrases: list[Phrase] = field(default_factory=list)
     total_sec: float = 0.0
     done_sec: float = 0.0
@@ -55,7 +47,7 @@ class Engine:
         import os
 
         import torch
-        import gigaam  # deferred: heavy imports, installed from GigaAM repo
+        import gigaam
 
         download_root = os.environ.get("GIGAAM_CACHE", "") or None
         logger.info("loading GigaAM %s on %s (cache=%s)...",
@@ -64,7 +56,7 @@ class Engine:
                                        download_root=download_root)
         self.device = torch.device(device)
         self.dtype = next(self.model.parameters()).dtype
-        self.lock = threading.Lock()  # one inference at a time on CPU
+        self.lock = threading.Lock()
         logger.info("model ready")
 
     def transcribe_samples(self, samples: np.ndarray) -> str:
@@ -86,13 +78,13 @@ class Engine:
             for start, end, audio in segment(samples):
                 if phrase_dbfs(audio) < -40.0:
                     job.done_sec = end
-                    continue  # silence/rustle: GigaAM hallucinates on these
+                    continue
                 text = self.transcribe_samples(audio)
                 if text:
                     job.phrases.append(Phrase(start, end, text))
                 job.done_sec = end
             job.status = "done"
-        except Exception as e:  # noqa: BLE001 - surfaced to UI
+        except Exception as e:
             logger.exception("job %s failed", job.id)
             job.status = "error"
             job.error = str(e)[:500]
@@ -123,31 +115,3 @@ def job_vtt(job: Job) -> str:
         out.append(f"{_ts(p.start).replace(',', '.')} --> "
                    f"{_ts(p.end).replace(',', '.')}\n{p.text}\n")
     return "\n".join(out)
-
-
-def demo():  # ponytail: runnable self-check for segment/timestamp logic (no model needed)
-    sr = SAMPLE_RATE
-    # synthetic voiced-like signal: 120 Hz buzz with vibrato + pauses.
-    # white noise is NOT speech for Silero, so demo uses a harmonic signal.
-    t = np.arange(sr * 6, dtype=np.float64) / sr
-    f0 = 120 + 8 * np.sin(2 * np.pi * 4 * t)
-    voiced = (0.25 * np.sin(2 * np.pi * f0 * t)
-              + 0.12 * np.sin(2 * np.pi * 2 * f0 * t)
-              + 0.06 * np.sin(2 * np.pi * 3 * f0 * t)).astype(np.float32)
-    voiced[int(2.5 * sr):int(3.5 * sr)] = 0  # 1s pause inside one phrase
-    from .vad import speech_timestamps  # noqa: E402
-
-    spans = speech_timestamps(voiced, min_speech_sec=0.5)
-    assert spans, "silero found no speech in harmonic signal"
-    start, end = spans[0][0], spans[-1][1]
-    assert start < 1.0 and end > 2.0, spans
-    job = Job(id="demo", filename="demo")
-    job.phrases.append(Phrase(start, end, "привет мир"))
-    srt = job_srt(job)
-    assert "-->" in srt and "привет мир" in srt, srt
-    assert job_text(job) == "привет мир"
-    print("demo OK:", srt.splitlines()[1])
-
-
-if __name__ == "__main__":
-    demo()

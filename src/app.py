@@ -1,12 +1,3 @@
-"""GigaAM transcription service: upload video/audio -> text + SRT.
-
-Two APIs:
-  * Own async jobs API: POST /upload -> GET /jobs/{id} (poll) -> text/srt.
-    For files of ANY length (hours).
-  * OpenAI-compatible sync API: POST /v1/audio/transcriptions
-    (multipart: file, model, language, response_format, ...). Blocks until
-    done — for short files and MiniMax/other services calling us.
-"""
 from __future__ import annotations
 
 import logging
@@ -41,7 +32,7 @@ engine: Engine | None = None
 def get_engine() -> Engine:
     global engine
     if engine is None:
-        engine = Engine()  # loads GigaAM once, warm for all jobs
+        engine = Engine()
     return engine
 
 
@@ -71,8 +62,6 @@ def save_upload(f: UploadFile) -> Path:
 def index():
     return FileResponse(BASE / "static" / "index.html")
 
-
-# ---- own async jobs API (any length) ----
 
 @app.post("/upload")
 def upload(f: UploadFile):
@@ -124,8 +113,6 @@ def job_vtt_dl(jid: str):
     return Response(job_vtt(j), media_type="text/vtt")
 
 
-# ---- OpenAI-compatible sync API ----
-
 ResponseFormat = Literal["json", "text", "verbose_json", "srt", "vtt"]
 
 
@@ -145,7 +132,6 @@ def verbose_json(job: Job, want_words: bool) -> dict:
         ],
     }
     if want_words:
-        # GigaAM gives no word timestamps: field present, empty (valid per spec).
         resp["words"] = []
     return resp
 
@@ -154,19 +140,13 @@ def verbose_json(job: Job, want_words: bool) -> dict:
 async def transcriptions(
     request: Request,
     file: UploadFile,
-    model: str = Form("gigaam-v3"),  # accepted, ignored: single local model
+    model: str = Form("gigaam-v3"),
     language: str | None = Form(None),
     prompt: str | None = Form(None),
     response_format: ResponseFormat = Form("json"),  # type: ignore[assignment]
     temperature: float = Form(0.0),
 ):
-    """OpenAI-compatible transcription. Blocks until done (sync).
-
-    curl example:
-      curl -F file=@a.mp3 -F model=gigaam-v3 \\
-        -F response_format=verbose_json http://localhost:8099/v1/audio/transcriptions
-    """
-    _ = language, prompt, temperature  # accepted for compat, unused
+    _ = model, language, prompt, temperature
     form = await request.form()
     granularities = form.getlist("timestamp_granularities[]") or ["segment"]
     if granularities == [""]:
@@ -180,7 +160,7 @@ async def transcriptions(
 
     dest = save_upload(file)
     job = Job(id=dest.stem, filename=file.filename or dest.name)
-    get_engine().run_job(job, str(dest))  # sync, like OpenAI
+    get_engine().run_job(job, str(dest))
     if job.status == "error":
         raise HTTPException(500, f"transcription failed: {job.error}")
 
@@ -192,5 +172,4 @@ async def transcriptions(
         return PlainTextResponse(job_srt(job), media_type="text/plain")
     if response_format == "vtt":
         return Response(job_vtt(job), media_type="text/vtt")
-    # verbose_json
     return JSONResponse(verbose_json(job, want_words="word" in granularities))
