@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from .downloader import download, extract_video_id
@@ -12,13 +13,13 @@ from .workdir import WorkDir
 logger = logging.getLogger("audio-video-to-text")
 
 
-def run_url_job(job: Job, url: str, data_dir: Path, engine: Engine, make_slides: bool = True):
+def run_url_job(job: Job, url: str, data_dir: Path, engine: Engine, make_slides: bool = True, browser: str | None = None) -> None:
     try:
         job.status = "downloading"
-        video_id = extract_video_id(url, None)
+        video_id = re.sub(r"[^\w-]", "_", extract_video_id(url, browser))
         wd = WorkDir(video_id, base=str(data_dir))
         if not wd.is_done("download"):
-            download(url, wd.video, None)
+            download(url, wd.video, browser)
             wd.mark_done("download")
         if not wd.is_done("audio"):
             extract_audio(wd.video, wd.audio)
@@ -42,4 +43,4 @@ def run_url_job(job: Job, url: str, data_dir: Path, engine: Engine, make_slides:
     except Exception as e:
         logger.exception("url job %s failed", job.id)
         job.status = "error"
-        job.error = str(e)[:500]
+        job.error = (str(e) or repr(e))[:500]

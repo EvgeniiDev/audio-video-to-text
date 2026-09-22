@@ -32,3 +32,6 @@ def test_render_segment_with_shot(tmp_path):
     text = out.read_text()
     assert "hello" in text and "world" in text
     assert "frame_5000.jpg" in text
+    # mid-split: 5s is interior to [0,10] (beyond 2s tolerance), so the
+    # image lands between the proportionally split chunks.
+    assert text.index("hello") < text.index("frame_5000.jpg") < text.index("world")

@@ -79,14 +79,13 @@ def upload(f: UploadFile):
 
 @app.post("/fetch")
 def fetch(url: str = Form(...), browser: str | None = Form(None)):
-    _ = browser
     u = urlparse(url.strip())
     if u.scheme not in ("http", "https") or not u.netloc:
         raise HTTPException(400, f"bad url: {url[:100]}")
     jid = uuid.uuid4().hex[:8]
     job = Job(id=jid, filename=url[:120])
     jobs[jid] = job
-    threading.Thread(target=lambda: run_url_job(job, url.strip(), DATA / jid, get_engine()), daemon=True).start()
+    threading.Thread(target=lambda: run_url_job(job, url.strip(), DATA / jid, get_engine(), browser=browser), daemon=True).start()
     return job_info(job)
 
 
@@ -97,7 +96,8 @@ def job_md(jid: str):
         raise HTTPException(404, "no such job")
     for cand in (DATA / jid).glob("*/transcript.md"):
         if cand.is_file():
-            return cand.read_text(encoding="utf-8")
+            text = cand.read_text(encoding="utf-8")
+            return text.replace("](screenshots/", f"](/jobs/{jid}/shots/")
     raise HTTPException(404, "no transcript yet")
 
 

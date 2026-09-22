@@ -41,10 +41,10 @@ curl -F file=@a.mp3 -F model=gigaam-v3 http://localhost:8099/v1/audio/transcript
 
 ## Ссылка (audio-video-to-text)
 
-В audio-video-to-text можно вставить ссылку на видео вместо загрузки файла: вставь URL в поле на главной, сервер скачает видео через yt-dlp, прогонит стадии (скачивание → сцены → OCR слайдов → ASR → transcript.md), а на выходе получишь `transcript.md` и слайды с распознанным текстом — всё в папке задачи.
+В audio-video-to-text можно вставить ссылку на видео вместо загрузки файла: вставь URL в поле на главной, сервер скачает видео через yt-dlp, прогонит стадии (скачивание → аудио → ASR → слайды → transcript.md), а на выходе получишь `transcript.md` со встроенными изображениями слайдов — всё в папке задачи.
 
 ```bash
-curl -X POST http://localhost:8099/fetch -H 'Content-Type: application/json' -d '{"url": "https://example.com/video"}'  # -> {"id": ...}
+curl -F url=https://example.com/video http://localhost:8099/fetch  # -> {"id": ...}
 curl http://localhost:8099/jobs/<id>/md   # готовый transcript.md
 ```
 

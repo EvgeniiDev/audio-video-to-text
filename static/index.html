@@ -29,7 +29,7 @@ h1 { font-size:22px; font-weight:600; }
 <h1>🎙 giga-transcribe <span style="color:#666;font-weight:400;font-size:14px">GigaAM v3</span></h1>
 <div id="drop">Перетащи видео или аудио сюда<br><span style="font-size:13px">mp4 · mkv · mp3 · wav · m4a · ogg</span></div>
 <div id="urlrow" style="display:flex;gap:8px;margin-top:12px">
-<input id="url" placeholder="Ссылка YouTube / Boosty…" style="flex:1;padding:10px;border-radius:8px;border:1px solid #444;background:#1e2126;color:#e8e8e8">
+<input id="url" placeholder="Ссылка YouTube / Boosty…" onkeydown="if(event.key==='Enter')document.getElementById('go').click()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #444;background:#1e2126;color:#e8e8e8">
 <button id="go" style="padding:10px 16px;border-radius:8px;border:1px solid #444;background:#1e2126;color:var(--acc);cursor:pointer">➔</button>
 </div>
 <div id="jobs"></div>
@@ -66,7 +66,7 @@ async function render(j) {
   el.innerHTML = `<div class="top"><span class="name">${esc(j.filename)}</span><span class="st">${esc(st)}</span></div>
     <div class="bar"><div style="width:${r.status==='done'?100:r.progress}%"></div></div>
     ${r.preview ? `<div class="preview">${esc(r.preview)}</div>` : ''}
-    ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a><a href="/jobs/${j.id}/md" download="transcript.md">.md</a></div>` : ''}`;
+    ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a><a href="/jobs/${j.id}/md" download="${esc(j.filename)}.md">.md</a></div>` : ''}`;
   if (r.status !== 'done' && r.status !== 'error') setTimeout(() => render(j), 2000);
 }
 // ETA from this job's own pace (done_sec audio per elapsed wall time),
