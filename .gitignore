@@ -1,6 +1,7 @@
 .venv/
 data/
 models/
+GigaAM/
 *.log
 __pycache__/
 *.pyc
