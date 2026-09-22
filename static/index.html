@@ -29,7 +29,7 @@ h1 { font-size:22px; font-weight:600; }
 <h1>🎙 giga-transcribe <span style="color:#666;font-weight:400;font-size:14px">GigaAM v3</span></h1>
 <div id="drop">Перетащи видео или аудио сюда<br><span style="font-size:13px">mp4 · mkv · mp3 · wav · m4a · ogg</span></div>
 <div id="jobs"></div>
-<p class="hint">Час видео на CPU — примерно 2–4 часа. Страницу можно закрывать, задачи живут на сервере.</p>
+<p class="hint">Страницу можно закрывать — задачи живут на сервере.</p>
 <script>
 const drop = document.getElementById('drop'), box = document.getElementById('jobs');
 const input = Object.assign(document.createElement('input'), {type:'file', accept:'video/*,audio/*', hidden:true});
