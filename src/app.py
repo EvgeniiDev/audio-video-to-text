@@ -48,7 +48,8 @@ def get_engine() -> Engine:
 def job_info(j: Job) -> dict:
     pct = round(j.done_sec / j.total_sec * 100) if j.total_sec else 0
     return {"id": j.id, "filename": j.filename, "status": j.status,
-            "progress": pct, "phrases": len(j.phrases), "error": j.error}
+            "progress": pct, "phrases": len(j.phrases), "error": j.error,
+            "total_sec": round(j.total_sec, 1), "done_sec": round(j.done_sec, 1)}
 
 
 def check_ext(filename: str) -> str:

@@ -50,12 +50,25 @@ async function render(j) {
   if (!el) { el = document.createElement('div'); el.id = 'j'+j.id; el.className = 'job'; box.prepend(el); }
   const r = await (await fetch('/jobs/'+j.id)).json();
   el.className = 'job ' + (r.status === 'done' ? 'done' : r.status === 'error' ? 'error' : '');
-  const st = {queued:'в очереди', decoding:'декодирую…', transcribing:`${r.progress}% · фраз: ${r.phrases}`, done:`готово · фраз: ${r.phrases}`, error:'ошибка: '+r.error}[r.status] || r.status;
+  const st = {queued:'в очереди', decoding:'декодирую…', transcribing:`${r.progress}% · фраз: ${r.phrases}${eta(r)}`, done:`готово · фраз: ${r.phrases}`, error:'ошибка: '+r.error}[r.status] || r.status;
   el.innerHTML = `<div class="top"><span class="name">${esc(j.filename)}</span><span class="st">${esc(st)}</span></div>
     <div class="bar"><div style="width:${r.status==='done'?100:r.progress}%"></div></div>
     ${r.preview ? `<div class="preview">${esc(r.preview)}</div>` : ''}
     ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a></div>` : ''}`;
   if (r.status !== 'done' && r.status !== 'error') setTimeout(() => render(j), 2000);
+}
+// ETA from this job's own pace (done_sec audio per elapsed wall time),
+// not a global benchmark — hardware varies wildly. Shown once past 5%.
+const _t0 = {};
+function eta(r) {
+  if (r.status !== 'transcribing' || !r.done_sec || r.progress < 5) return '';
+  const now = Date.now() / 1000;
+  if (!_t0[r.id]) _t0[r.id] = now;
+  const el = now - _t0[r.id];
+  if (el < 3) return '';
+  const left = Math.round((r.total_sec - r.done_sec) / (r.done_sec / el));
+  if (left < 5 || !isFinite(left)) return '';
+  return ' · осталось ~' + (left >= 90 ? Math.round(left / 60) + ' мин' : left + ' с');
 }
 function esc(s){return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 fetch('/jobs').then(r => r.json()).then(js => js.forEach(render));
