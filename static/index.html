@@ -28,6 +28,10 @@ h1 { font-size:22px; font-weight:600; }
 <body>
 <h1>🎙 giga-transcribe <span style="color:#666;font-weight:400;font-size:14px">GigaAM v3</span></h1>
 <div id="drop">Перетащи видео или аудио сюда<br><span style="font-size:13px">mp4 · mkv · mp3 · wav · m4a · ogg</span></div>
+<div id="urlrow" style="display:flex;gap:8px;margin-top:12px">
+<input id="url" placeholder="Ссылка YouTube / Boosty…" style="flex:1;padding:10px;border-radius:8px;border:1px solid #444;background:#1e2126;color:#e8e8e8">
+<button id="go" style="padding:10px 16px;border-radius:8px;border:1px solid #444;background:#1e2126;color:var(--acc);cursor:pointer">➔</button>
+</div>
 <div id="jobs"></div>
 <p class="hint">Страницу можно закрывать — задачи живут на сервере.</p>
 <script>
@@ -45,16 +49,24 @@ async function send(file) {
   if (!r.ok) { alert('Ошибка: ' + await r.text()); return; }
   render(await r.json());
 }
+document.getElementById('go').onclick = async () => {
+  const url = document.getElementById('url').value.trim();
+  if (!url) return;
+  const fd = new FormData(); fd.append('url', url);
+  const r = await fetch('/fetch', {method:'POST', body:fd});
+  if (!r.ok) { alert('Ошибка: ' + await r.text()); return; }
+  render(await r.json());
+}
 async function render(j) {
   let el = document.getElementById('j'+j.id);
   if (!el) { el = document.createElement('div'); el.id = 'j'+j.id; el.className = 'job'; box.prepend(el); }
   const r = await (await fetch('/jobs/'+j.id)).json();
   el.className = 'job ' + (r.status === 'done' ? 'done' : r.status === 'error' ? 'error' : '');
-  const st = {queued:'в очереди', decoding:'декодирую…', transcribing:`${r.progress}% · фраз: ${r.phrases}${eta(r)}`, done:`готово · фраз: ${r.phrases}`, error:'ошибка: '+r.error}[r.status] || r.status;
+  const st = {queued:'в очереди', downloading:'качаю…', decoding:'декодирую…', slides:'ищу слайды…', transcribing:`${r.progress}% · фраз: ${r.phrases}${eta(r)}`, done:`готово · фраз: ${r.phrases}`, error:'ошибка: '+r.error}[r.status] || r.status;
   el.innerHTML = `<div class="top"><span class="name">${esc(j.filename)}</span><span class="st">${esc(st)}</span></div>
     <div class="bar"><div style="width:${r.status==='done'?100:r.progress}%"></div></div>
     ${r.preview ? `<div class="preview">${esc(r.preview)}</div>` : ''}
-    ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a></div>` : ''}`;
+    ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a><a href="/jobs/${j.id}/md" download="transcript.md">.md</a></div>` : ''}`;
   if (r.status !== 'done' && r.status !== 'error') setTimeout(() => render(j), 2000);
 }
 // ETA from this job's own pace (done_sec audio per elapsed wall time),
