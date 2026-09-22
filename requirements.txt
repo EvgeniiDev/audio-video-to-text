@@ -13,3 +13,10 @@ onnx==1.23.0
 onnxruntime==1.30.0
 sentencepiece==0.2.2
 tqdm==4.70.1
+# Link-flow pipeline (ported from video-exporter, unpinned like upstream):
+yt-dlp
+scenedetect[opencv]
+pytesseract
+Pillow
+imagehash
+pandas

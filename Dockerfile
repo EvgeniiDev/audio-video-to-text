@@ -9,7 +9,7 @@ FROM ${PYTHON_IMAGE} AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg curl ca-certificates \
+      ffmpeg curl ca-certificates tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/* \
  && useradd -m app && mkdir -p /app/data /models /pkg \
  && chown app:app /app/data /models
