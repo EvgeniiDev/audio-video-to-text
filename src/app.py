@@ -5,6 +5,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
@@ -78,7 +79,6 @@ def upload(f: UploadFile):
 
 @app.post("/fetch")
 def fetch(url: str = Form(...), browser: str | None = Form(None)):
-    from urllib.parse import urlparse
     _ = browser
     u = urlparse(url.strip())
     if u.scheme not in ("http", "https") or not u.netloc:
@@ -95,8 +95,8 @@ def job_md(jid: str):
     j = jobs.get(jid)
     if not j:
         raise HTTPException(404, "no such job")
-    for cand in DATA.glob("**/transcript.md"):
-        if j.filename.startswith(cand.parent.name):
+    for cand in (DATA / jid).glob("*/transcript.md"):
+        if cand.is_file():
             return cand.read_text(encoding="utf-8")
     raise HTTPException(404, "no transcript yet")
 
@@ -108,8 +108,8 @@ def job_shot(jid: str, name: str):
         raise HTTPException(404, "no such job")
     if "/" in name or not name.endswith(".jpg"):
         raise HTTPException(400, "bad name")
-    for cand in DATA.glob(f"**/screenshots/{name}"):
-        if j.filename.startswith(cand.parents[1].name):
+    for cand in (DATA / jid).glob("*/screenshots/*.jpg"):
+        if cand.name == name and cand.is_file():
             return FileResponse(cand)
     raise HTTPException(404, "no such shot")
 
