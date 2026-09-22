@@ -1,16 +1,25 @@
-"""GigaAM transcription service: upload video/audio -> text + SRT."""
+"""GigaAM transcription service: upload video/audio -> text + SRT.
+
+Two APIs:
+  * Own async jobs API: POST /upload -> GET /jobs/{id} (poll) -> text/srt.
+    For files of ANY length (hours).
+  * OpenAI-compatible sync API: POST /v1/audio/transcriptions
+    (multipart: file, model, language, response_format, ...). Blocks until
+    done — for short files and MiniMax/other services calling us.
+"""
 from __future__ import annotations
 
 import logging
 import threading
 import uuid
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .engine import Engine, Job, job_srt, job_text
+from .engine import Engine, Job, job_srt, job_text, job_vtt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("giga-transcribe")
@@ -18,6 +27,9 @@ logger = logging.getLogger("giga-transcribe")
 BASE = Path(__file__).resolve().parent.parent
 DATA = BASE / "data"
 DATA.mkdir(exist_ok=True)
+
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".mp4", ".mkv",
+              ".webm", ".mov", ".avi", ".mpga", ".mpeg", ".oga", ".opus"}
 
 app = FastAPI(title="giga-transcribe")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
@@ -39,19 +51,32 @@ def job_info(j: Job) -> dict:
             "progress": pct, "phrases": len(j.phrases), "error": j.error}
 
 
+def check_ext(filename: str) -> str:
+    ext = Path(filename or "audio").suffix.lower()
+    if ext not in AUDIO_EXTS:
+        raise HTTPException(400, f"unsupported format: {ext or '?'}")
+    return ext
+
+
+def save_upload(f: UploadFile) -> Path:
+    ext = check_ext(f.filename or "")
+    jid = uuid.uuid4().hex[:8]
+    dest = DATA / f"{jid}{ext}"
+    dest.write_bytes(f.file.read())
+    return dest
+
+
 @app.get("/")
 def index():
     return FileResponse(BASE / "static" / "index.html")
 
 
+# ---- own async jobs API (any length) ----
+
 @app.post("/upload")
 def upload(f: UploadFile):
-    ext = Path(f.filename or "audio").suffix.lower()
-    if ext not in {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".mp4", ".mkv", ".webm", ".mov", ".avi"}:
-        raise HTTPException(400, f"unsupported format: {ext or '?'}")
-    jid = uuid.uuid4().hex[:8]
-    dest = DATA / f"{jid}{ext}"
-    dest.write_bytes(f.file.read())
+    dest = save_upload(f)
+    jid = dest.stem
     job = Job(id=jid, filename=f.filename or dest.name)
     jobs[jid] = job
     threading.Thread(target=lambda: get_engine().run_job(job, str(dest)),
@@ -88,3 +113,83 @@ def job_srt_dl(jid: str):
     if not j:
         raise HTTPException(404, "no such job")
     return job_srt(j)
+
+
+@app.get("/jobs/{jid}/vtt", response_class=PlainTextResponse)
+def job_vtt_dl(jid: str):
+    j = jobs.get(jid)
+    if not j:
+        raise HTTPException(404, "no such job")
+    return Response(job_vtt(j), media_type="text/vtt")
+
+
+# ---- OpenAI-compatible sync API ----
+
+ResponseFormat = Literal["json", "text", "verbose_json", "srt", "vtt"]
+
+
+def verbose_json(job: Job, want_words: bool) -> dict:
+    resp: dict = {
+        "task": "transcribe",
+        "language": "russian",
+        "duration": round(job.total_sec, 2),
+        "text": job_text(job),
+        "segments": [
+            {"id": i, "seek": 0,
+             "start": round(p.start, 2), "end": round(p.end, 2),
+             "text": p.text, "tokens": [],
+             "temperature": 0.0, "avg_logprob": 0.0,
+             "compression_ratio": 1.0, "no_speech_prob": 0.0}
+            for i, p in enumerate(job.phrases)
+        ],
+    }
+    if want_words:
+        # GigaAM gives no word timestamps: field present, empty (valid per spec).
+        resp["words"] = []
+    return resp
+
+
+@app.post("/v1/audio/transcriptions")
+async def transcriptions(
+    request: Request,
+    file: UploadFile,
+    model: str = Form("gigaam-v3"),  # accepted, ignored: single local model
+    language: str | None = Form(None),
+    prompt: str | None = Form(None),
+    response_format: ResponseFormat = Form("json"),  # type: ignore[assignment]
+    temperature: float = Form(0.0),
+):
+    """OpenAI-compatible transcription. Blocks until done (sync).
+
+    curl example:
+      curl -F file=@a.mp3 -F model=gigaam-v3 \\
+        -F response_format=verbose_json http://localhost:8099/v1/audio/transcriptions
+    """
+    _ = language, prompt, temperature  # accepted for compat, unused
+    form = await request.form()
+    granularities = form.getlist("timestamp_granularities[]") or ["segment"]
+    if granularities == [""]:
+        granularities = ["segment"]
+    bad = [g for g in granularities if g not in ("segment", "word")]
+    if bad:
+        raise HTTPException(400, f"bad timestamp_granularities: {bad}")
+    if "word" in granularities and response_format != "verbose_json":
+        logger.warning("word timestamps requested with format %s: ignored",
+                       response_format)
+
+    dest = save_upload(file)
+    job = Job(id=dest.stem, filename=file.filename or dest.name)
+    get_engine().run_job(job, str(dest))  # sync, like OpenAI
+    if job.status == "error":
+        raise HTTPException(500, f"transcription failed: {job.error}")
+
+    if response_format == "json":
+        return {"text": job_text(job)}
+    if response_format == "text":
+        return PlainTextResponse(job_text(job))
+    if response_format == "srt":
+        return PlainTextResponse(job_srt(job), media_type="text/plain")
+    if response_format == "vtt":
+        return Response(job_vtt(job), media_type="text/vtt")
+    # verbose_json
+    return JSONResponse(verbose_json(job, want_words="word" in granularities))

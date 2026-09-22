@@ -52,11 +52,16 @@ class Job:
 
 class Engine:
     def __init__(self, model_name: str = MODEL_NAME, device: str = "cpu"):
+        import os
+
         import torch
         import gigaam  # deferred: heavy imports, installed from GigaAM repo
 
-        logger.info("loading GigaAM %s on %s...", model_name, device)
-        self.model = gigaam.load_model(model_name, device=device)
+        download_root = os.environ.get("GIGAAM_CACHE", "") or None
+        logger.info("loading GigaAM %s on %s (cache=%s)...",
+                    model_name, device, download_root or "~/.cache/gigaam")
+        self.model = gigaam.load_model(model_name, device=device,
+                                       download_root=download_root)
         self.device = torch.device(device)
         self.dtype = next(self.model.parameters()).dtype
         self.lock = threading.Lock()  # one inference at a time on CPU
@@ -112,18 +117,30 @@ def job_srt(job: Job) -> str:
     return "\n".join(out)
 
 
-def demo():  # ponytail: runnable self-check for segment/timestamp logic (no model needed)
-    from .vad import EnergyVAD  # noqa: F401
+def job_vtt(job: Job) -> str:
+    out = ["WEBVTT", ""]
+    for p in job.phrases:
+        out.append(f"{_ts(p.start).replace(',', '.')} --> "
+                   f"{_ts(p.end).replace(',', '.')}\n{p.text}\n")
+    return "\n".join(out)
 
+
+def demo():  # ponytail: runnable self-check for segment/timestamp logic (no model needed)
     sr = SAMPLE_RATE
-    silence = np.zeros(sr, dtype=np.float32)
-    rng = np.random.default_rng(0)
-    speech = (rng.standard_normal(sr * 2) * 0.3).astype(np.float32)  # 2s loud
-    samples = np.concatenate([silence, speech, silence])
-    segs = list(segment(samples))
-    assert len(segs) == 1, segs
-    start, end, _ = segs[0]
-    assert start < 1.0 < end, (start, end)
+    # synthetic voiced-like signal: 120 Hz buzz with vibrato + pauses.
+    # white noise is NOT speech for Silero, so demo uses a harmonic signal.
+    t = np.arange(sr * 6, dtype=np.float64) / sr
+    f0 = 120 + 8 * np.sin(2 * np.pi * 4 * t)
+    voiced = (0.25 * np.sin(2 * np.pi * f0 * t)
+              + 0.12 * np.sin(2 * np.pi * 2 * f0 * t)
+              + 0.06 * np.sin(2 * np.pi * 3 * f0 * t)).astype(np.float32)
+    voiced[int(2.5 * sr):int(3.5 * sr)] = 0  # 1s pause inside one phrase
+    from .vad import speech_timestamps  # noqa: E402
+
+    spans = speech_timestamps(voiced, min_speech_sec=0.5)
+    assert spans, "silero found no speech in harmonic signal"
+    start, end = spans[0][0], spans[-1][1]
+    assert start < 1.0 and end > 2.0, spans
     job = Job(id="demo", filename="demo")
     job.phrases.append(Phrase(start, end, "привет мир"))
     srt = job_srt(job)

@@ -1,0 +1,27 @@
+services:
+  transcribe:
+    build:
+      context: .
+      args:
+        PYTHON_IMAGE: python:3.14-slim
+        GIGAAM_REF: main
+        MODEL_NAME: v3_e2e_ctc
+        TORCH_VER: 2.9.1+cpu
+    image: giga-transcribe:latest
+    user: "${UID:-1000}:${GID:-1000}"  # write uploads as host user, not root
+    ports:
+      - "8099:8099"
+    volumes:
+      # uploads + job files
+      - ./data:/app/data
+      # External weights dir — survives image rebuilds, shared between
+      # versions. Uncomment: entrypoint uses it as-is if non-empty,
+      # downloads ~422MB once if empty.
+      # - ./models:/models
+    environment:
+      GIGAAM_CACHE: /models
+      MODEL_NAME: v3_e2e_ctc
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      # TRANSCRIBE_API_KEY: xxx   # uncomment to require Bearer auth
+    restart: unless-stopped

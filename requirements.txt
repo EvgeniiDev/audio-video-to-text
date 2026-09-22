@@ -1,10 +1,15 @@
-# GigaAM itself is installed from the cloned repo (editable).
-# See README for setup. Runtime deps of this service:
-fastapi>=0.115
-uvicorn[standard]>=0.30
-python-multipart>=0.0.9   # file uploads
-soundfile>=0.12
-numpy>=1.26
-torch>=2.8.0
-torchaudio>=2.8.0
-# gigaam: pip install -e ./GigaAM  (clone https://github.com/salute-developers/GigaAM)
+# GigaAM from git (see Dockerfile). Runtime deps, max versions @ 2026-09:
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+python-multipart==0.0.32
+soundfile==0.14.0
+numpy==2.5.3
+# torch/torchaudio: CPU-only, pinned in Dockerfile (2.9.1+cpu)
+silero-vad==6.2.2  # neural VAD for phrase chunking (weights bundled, offline)
+# GigaAM transitive (pinned by upstream):
+hydra-core==1.3.7
+omegaconf==2.3.1
+onnx==1.23.0
+onnxruntime==1.30.0
+sentencepiece==0.2.2
+tqdm==4.70.1

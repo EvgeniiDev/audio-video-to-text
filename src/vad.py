@@ -1,36 +1,31 @@
-"""VAD segmentation for files. Same idea as qwen_talker streaming ASR
-(EnergyVAD + hangover + max segment), but fed with blocks decoded from a
-file instead of a microphone. Yields (start_sec, end_sec, samples) per phrase.
+"""VAD segmentation for files via Silero VAD (snakers4/silero-vad).
+
+Takes mono float32 16 kHz audio of ANY length, yields
+(start_sec, end_sec, samples) per speech phrase. Model is loaded once
+(weights bundled in the pip package, works offline) and reused.
 """
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 
+SAMPLE_RATE = 16000
 
-class EnergyVAD:
-    """Adaptive energy VAD, block-wise. Port of qwen_talker/src/asr/realtime_asr."""
+_model = None
+_model_lock = threading.Lock()
 
-    def __init__(self, margin_db: float = 10.0, abs_floor_db: float = -55.0):
-        self.margin_db = margin_db
-        self.abs_floor_db = abs_floor_db
-        self.noise_db = -60.0
-        self._initialized = False
 
-    @staticmethod
-    def _dbfs(block: np.ndarray) -> float:
-        rms = float(np.sqrt(np.mean(block.astype(np.float64) ** 2)) + 1e-10)
-        return 20.0 * np.log10(rms)
+def get_vad_model():
+    """Silero VAD model, lazy singleton (thread-safe)."""
+    global _model
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                from silero_vad import load_silero_vad
 
-    def is_speech(self, block: np.ndarray) -> bool:
-        level = self._dbfs(block)
-        if not self._initialized:
-            self.noise_db = level
-            self._initialized = True
-        threshold = max(self.noise_db + self.margin_db, self.abs_floor_db)
-        speech = level > threshold
-        if not speech:
-            self.noise_db = 0.9 * self.noise_db + 0.1 * level
-        return speech
+                _model = load_silero_vad()
+    return _model
 
 
 def phrase_dbfs(audio: np.ndarray) -> float:
@@ -39,59 +34,53 @@ def phrase_dbfs(audio: np.ndarray) -> float:
     return 20.0 * np.log10(rms)
 
 
+def speech_timestamps(
+    samples: np.ndarray,
+    sample_rate: int = SAMPLE_RATE,
+    threshold: float = 0.5,
+    min_speech_sec: float = 0.25,
+    min_silence_sec: float = 0.5,
+    pad_sec: float = 0.2,
+    max_segment: float = 25.0,
+) -> list[tuple[float, float]]:
+    """Speech regions as (start_sec, end_sec). Input length is unlimited:
+    Silero iterates internally in ~32 ms windows with O(n) time."""
+    import torch
+    from silero_vad import get_speech_timestamps
+
+    if sample_rate != SAMPLE_RATE:
+        raise ValueError(f"Silero VAD needs {SAMPLE_RATE} Hz, got {sample_rate}")
+    model = get_vad_model()
+    wav = torch.from_numpy(np.ascontiguousarray(samples, dtype=np.float32))
+    with _model_lock:  # JIT model holds recurrent state; serialize access
+        model.reset_states()
+        with torch.inference_mode():
+            ts = get_speech_timestamps(
+                wav,
+                model,
+                return_seconds=True,
+                threshold=threshold,
+                min_speech_duration_ms=int(min_speech_sec * 1000),
+                min_silence_duration_ms=int(min_silence_sec * 1000),
+                speech_pad_ms=int(pad_sec * 1000),
+                max_speech_duration_s=max_segment,
+            )
+    return [(float(d["start"]), float(d["end"])) for d in ts]
+
+
 def segment(
     samples: np.ndarray,
-    sample_rate: int = 16000,
-    block_sec: float = 0.1,
-    silence_hangover: float = 0.8,
-    min_speech: float = 0.8,
-    pre_roll: float = 0.3,
+    sample_rate: int = SAMPLE_RATE,
     max_segment: float = 25.0,
-    vad_margin: float = 10.0,
-):
+    **kwargs,
+) -> tuple[float, float, np.ndarray]:
     """Split mono float32 audio into speech phrases.
 
-    Yields (start_sec, end_sec, audio) tuples. Times are in seconds.
+    Yields (start_sec, end_sec, audio) tuples. Same interface as the old
+    EnergyVAD segmenter, so engine.py needs no changes. Extra kwargs
+    (block_sec, silence_hangover, ...) are accepted and ignored for
+    backward compatibility.
     """
-    block = int(sample_rate * block_sec)
-    vad = EnergyVAD(margin_db=vad_margin)
-    hangover_blocks = max(1, int(round(silence_hangover / block_sec)))
-    min_blocks = max(1, int(round(min_speech / block_sec)))
-    pre_roll_blocks = max(0, int(round(pre_roll / block_sec)))
-    max_blocks = int(round(max_segment / block_sec))
-
-    n_blocks = (len(samples) + block - 1) // block
-    pre: list[np.ndarray] = []
-    seg: list[np.ndarray] = []
-    seg_start = 0
-    active = False
-    silence_run = 0
-
-    def finalize(end_block: int):
-        nonlocal seg, active, silence_run
-        if seg and len(seg) >= min_blocks:
-            audio = np.concatenate(seg)
-            yield (seg_start * block_sec, end_block * block_sec, audio)
-        seg = []
-        active = False
-        silence_run = 0
-
-    for i in range(n_blocks):
-        blk = samples[i * block:(i + 1) * block]
-        speech = vad.is_speech(blk)
-        if not active:
-            pre.append(blk)
-            if len(pre) > pre_roll_blocks:
-                pre.pop(0)
-            if speech:
-                active = True
-                seg = list(pre)
-                seg_start = i - len(pre) + 1
-                pre = []
-                silence_run = 0
-            continue
-        seg.append(blk)
-        silence_run = silence_run + 1 if not speech else 0
-        if silence_run >= hangover_blocks or len(seg) >= max_blocks:
-            yield from finalize(i + 1)
-    yield from finalize(n_blocks)
+    for start, end in speech_timestamps(samples, sample_rate, max_segment=max_segment):
+        s0, s1 = int(start * sample_rate), int(end * sample_rate)
+        yield (start, end, samples[s0:s1])
