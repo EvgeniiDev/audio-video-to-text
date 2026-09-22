@@ -5,3 +5,5 @@ GigaAM/
 *.log
 __pycache__/
 *.pyc
+
+.superpowers/sdd/
