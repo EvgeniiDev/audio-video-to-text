@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 
 from .engine import Engine, Job, job_srt, job_text, job_vtt
+from .pipeline import run_url_job
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("giga-transcribe")
@@ -39,6 +40,7 @@ def get_engine() -> Engine:
 def job_info(j: Job) -> dict:
     pct = round(j.done_sec / j.total_sec * 100) if j.total_sec else 0
     return {"id": j.id, "filename": j.filename, "status": j.status,
+            "stage": j.status,
             "progress": pct, "phrases": len(j.phrases), "error": j.error,
             "total_sec": round(j.total_sec, 1), "done_sec": round(j.done_sec, 1)}
 
@@ -72,6 +74,44 @@ def upload(f: UploadFile):
     threading.Thread(target=lambda: get_engine().run_job(job, str(dest)),
                      daemon=True).start()
     return job_info(job)
+
+
+@app.post("/fetch")
+def fetch(url: str = Form(...), browser: str | None = Form(None)):
+    from urllib.parse import urlparse
+    _ = browser
+    u = urlparse(url.strip())
+    if u.scheme not in ("http", "https") or not u.netloc:
+        raise HTTPException(400, f"bad url: {url[:100]}")
+    jid = uuid.uuid4().hex[:8]
+    job = Job(id=jid, filename=url[:120])
+    jobs[jid] = job
+    threading.Thread(target=lambda: run_url_job(job, url.strip(), DATA / jid, get_engine()), daemon=True).start()
+    return job_info(job)
+
+
+@app.get("/jobs/{jid}/md", response_class=PlainTextResponse)
+def job_md(jid: str):
+    j = jobs.get(jid)
+    if not j:
+        raise HTTPException(404, "no such job")
+    for cand in DATA.glob("**/transcript.md"):
+        if j.filename.startswith(cand.parent.name):
+            return cand.read_text(encoding="utf-8")
+    raise HTTPException(404, "no transcript yet")
+
+
+@app.get("/jobs/{jid}/shots/{name}")
+def job_shot(jid: str, name: str):
+    j = jobs.get(jid)
+    if not j:
+        raise HTTPException(404, "no such job")
+    if "/" in name or not name.endswith(".jpg"):
+        raise HTTPException(400, "bad name")
+    for cand in DATA.glob(f"**/screenshots/{name}"):
+        if j.filename.startswith(cand.parents[1].name):
+            return FileResponse(cand)
+    raise HTTPException(404, "no such shot")
 
 
 @app.get("/jobs")
