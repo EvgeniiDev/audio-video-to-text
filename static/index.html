@@ -32,6 +32,8 @@ h1 { font-size:22px; font-weight:600; }
 <input id="url" placeholder="Ссылка YouTube / Boosty…" onkeydown="if(event.key==='Enter')document.getElementById('go').click()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #444;background:#1e2126;color:#e8e8e8">
 <button id="go" style="padding:10px 16px;border-radius:8px;border:1px solid #444;background:#1e2126;color:var(--acc);cursor:pointer">➔</button>
 </div>
+<input id="cookie" placeholder="Кука для приватных постов (необязательно)" onkeydown="if(event.key==='Enter')document.getElementById('go').click()" style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #444;background:#1e2126;color:#e8e8e8">
+<p class="hint">Приватный пост на Boosty: открой пост в браузере → F12 → Application → Cookies → скопируй значение куки <b>auth</b> сюда. Без подписки на автора не сработает.</p>
 <div id="jobs"></div>
 <p class="hint">Страницу можно закрывать — задачи живут на сервере.</p>
 <script>
@@ -53,6 +55,8 @@ document.getElementById('go').onclick = async () => {
   const url = document.getElementById('url').value.trim();
   if (!url) return;
   const fd = new FormData(); fd.append('url', url);
+  const cookie = document.getElementById('cookie').value.trim();
+  if (cookie) fd.append('cookie', cookie);
   const r = await fetch('/fetch', {method:'POST', body:fd});
   if (!r.ok) { alert('Ошибка: ' + await r.text()); return; }
   render(await r.json());

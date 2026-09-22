@@ -78,14 +78,17 @@ def upload(f: UploadFile):
 
 
 @app.post("/fetch")
-def fetch(url: str = Form(...), browser: str | None = Form(None)):
+def fetch(url: str = Form(...), browser: str | None = Form(None), cookie: str | None = Form(None)):
     u = urlparse(url.strip())
     if u.scheme not in ("http", "https") or not u.netloc:
         raise HTTPException(400, f"bad url: {url[:100]}")
+    cookie = (cookie or "").strip() or None
+    if cookie and len(cookie) > 4000:
+        raise HTTPException(400, "cookie too long")
     jid = uuid.uuid4().hex[:8]
     job = Job(id=jid, filename=url[:120])
     jobs[jid] = job
-    threading.Thread(target=lambda: run_url_job(job, url.strip(), DATA / jid, get_engine(), browser=browser), daemon=True).start()
+    threading.Thread(target=lambda: run_url_job(job, url.strip(), DATA / jid, get_engine(), browser=browser, cookie=cookie), daemon=True).start()
     return job_info(job)
 
 

@@ -2,17 +2,19 @@ import yt_dlp
 from pathlib import Path
 
 
-def _base_opts(browser: str | None) -> dict:
+def _base_opts(browser: str | None, cookie: str | None = None) -> dict:
     opts: dict = {"quiet": False, "no_warnings": False}
     if browser:
         opts["cookiesfrombrowser"] = (browser, None, None, None)
+    if cookie:
+        opts["http_headers"] = {"Cookie": cookie.strip()}
     return opts
 
 
-def download(url: str, output_path: Path, browser: str | None) -> dict:
+def download(url: str, output_path: Path, browser: str | None, cookie: str | None = None) -> dict:
     """Download video to output_path. Returns yt-dlp info dict."""
     ydl_opts = {
-        **_base_opts(browser),
+        **_base_opts(browser, cookie),
         "outtmpl": str(output_path),
         "format": "bestvideo[height<=720][ext=mp4][vcodec!^=av01]+bestaudio[ext=m4a]/bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best",
         "merge_output_format": "mp4",
@@ -22,10 +24,10 @@ def download(url: str, output_path: Path, browser: str | None) -> dict:
     return info
 
 
-def extract_video_id(url: str, browser: str | None) -> str:
+def extract_video_id(url: str, browser: str | None, cookie: str | None = None) -> str:
     """Extract video id without downloading."""
     ydl_opts = {
-        **_base_opts(browser),
+        **_base_opts(browser, cookie),
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,

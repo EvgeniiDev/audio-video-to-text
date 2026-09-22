@@ -13,13 +13,13 @@ from .workdir import WorkDir
 logger = logging.getLogger("audio-video-to-text")
 
 
-def run_url_job(job: Job, url: str, data_dir: Path, engine: Engine, make_slides: bool = True, browser: str | None = None) -> None:
+def run_url_job(job: Job, url: str, data_dir: Path, engine: Engine, make_slides: bool = True, browser: str | None = None, cookie: str | None = None) -> None:
     try:
         job.status = "downloading"
-        video_id = re.sub(r"[^\w-]", "_", extract_video_id(url, browser))
+        video_id = re.sub(r"[^\w-]", "_", extract_video_id(url, browser, cookie))
         wd = WorkDir(video_id, base=str(data_dir))
         if not wd.is_done("download"):
-            download(url, wd.video, browser)
+            download(url, wd.video, browser, cookie)
             wd.mark_done("download")
         if not wd.is_done("audio"):
             extract_audio(wd.video, wd.audio)
