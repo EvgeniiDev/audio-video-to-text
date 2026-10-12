@@ -11,8 +11,9 @@ body { background:var(--bg); color:#e8e8e8; font:16px/1.5 system-ui,sans-serif; 
 h1 { font-size:22px; font-weight:600; }
 #drop { border:2px dashed #444; border-radius:12px; padding:40px 20px; text-align:center; color:#999; cursor:pointer; transition:.15s; }
 #drop:hover, #drop.over { border-color:var(--acc); color:var(--acc); background:#1a222c; }
-.job { background:var(--card); border-radius:10px; padding:14px 16px; margin-top:12px; }
+.job { position:relative; background:var(--card); border-radius:10px; padding:14px 16px; margin-top:12px; }
 .job .top { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+.job.done .top, .job.error .top { padding-right:30px; }
 .job .name { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .job .st { font-size:13px; color:#aaa; white-space:nowrap; }
 .bar { height:6px; background:#333; border-radius:3px; margin:10px 0; overflow:hidden; }
@@ -23,11 +24,12 @@ h1 { font-size:22px; font-weight:600; }
 .job.done .bar > div { background:var(--ok); }
 .job.error .st { color:var(--err); }
 .preview { font-size:14px; color:#bbb; max-height:7.5em; overflow:hidden; margin:8px 0; white-space:pre-wrap; }
-.btns a, .btns button { display:inline-block; margin-right:8px; padding:4px 12px; border:1px solid #444; border-radius:6px; color:var(--acc); text-decoration:none; font-size:14px; }
-.btns a:hover, .btns button:hover { border-color:var(--acc); }
-.btns button { background:transparent; font:inherit; font-size:14px; cursor:pointer; }
-.btns .delete { color:var(--err); }
-.btns button:disabled { opacity:.5; cursor:wait; }
+.btns a { display:inline-block; margin-right:8px; padding:4px 12px; border:1px solid #444; border-radius:6px; color:var(--acc); text-decoration:none; font-size:14px; }
+.btns a:hover { border-color:var(--acc); }
+.job .delete { position:absolute; top:10px; right:10px; width:28px; height:28px; padding:0; border:0; border-radius:5px; background:transparent; color:#999; font:24px/1 system-ui,sans-serif; cursor:pointer; }
+.job .delete:hover { color:var(--err); background:#34272a; }
+.job .delete:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+.job .delete:disabled { opacity:.5; cursor:wait; }
 .delete-error { color:var(--err); font-size:13px; margin-top:8px; }
 .hint { color:#666; font-size:13px; margin-top:16px; }
 </style>
@@ -118,11 +120,11 @@ async function render(j) {
   const r = await response.json();
   el.className = 'job ' + (r.status === 'done' ? 'done' : r.status === 'error' ? 'error' : '');
   const st = {queued:'в очереди', downloading:'качаю…', decoding:'декодирую…', slides:'ищу слайды…', transcribing:`${r.progress}% · фраз: ${r.phrases}${eta(r)}`, done:`готово · фраз: ${r.phrases}`, error:'ошибка: '+r.error}[r.status] || r.status;
-  el.innerHTML = `<div class="top"><span class="name">${esc(j.filename)}</span><span class="st">${esc(st)}</span></div>
+  el.innerHTML = `<div class="top"><span class="name">${esc(j.filename)}</span><span class="st">${esc(st)}</span>${r.status==='done' || r.status==='error' ? '<button type="button" class="delete" aria-label="Удалить транскрипт" title="Удалить транскрипт">×</button>' : ''}</div>
     <div class="bar"><div style="width:${r.status==='done'?100:r.progress}%"></div></div>
     ${r.preview ? `<div class="preview">${esc(r.preview)}</div>` : ''}
     ${r.status==='done' ? `<div class="btns"><a href="/jobs/${j.id}/text" download="${esc(j.filename)}.txt">.txt</a><a href="/jobs/${j.id}/srt" download="${esc(j.filename)}.srt">.srt</a><a href="/jobs/${j.id}/md" download="${esc(j.filename)}.md">.md</a></div>` : ''}
-    ${r.status==='done' || r.status==='error' ? '<div class="btns"><button type="button" class="delete">Удалить</button></div><div class="delete-error" role="status"></div>' : ''}`;
+    ${r.status==='done' || r.status==='error' ? '<div class="delete-error" role="status"></div>' : ''}`;
   const button = el.querySelector('.delete');
   if (button) button.onclick = () => removeJob(j, el, button);
   if (r.status !== 'done' && r.status !== 'error') setTimeout(() => render(j), 2000);
@@ -131,7 +133,7 @@ async function removeJob(j, el, button) {
   if (button.disabled) return;
   if (!confirm('Удалить транскрипт «' + j.filename + '» и файлы этой задачи?')) return;
   button.disabled = true;
-  button.textContent = 'Удаляю…';
+  button.textContent = '…';
   const error = el.querySelector('.delete-error');
   error.textContent = '';
   try {
@@ -146,7 +148,7 @@ async function removeJob(j, el, button) {
   } catch (err) {
     error.textContent = 'Не удалось удалить: ' + err.message;
     button.disabled = false;
-    button.textContent = 'Удалить';
+    button.textContent = '×';
   }
 }
 // ETA from this job's own pace (done_sec audio per elapsed wall time),
