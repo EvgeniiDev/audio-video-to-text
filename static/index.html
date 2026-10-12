@@ -17,6 +17,9 @@ h1 { font-size:22px; font-weight:600; }
 .job .st { font-size:13px; color:#aaa; white-space:nowrap; }
 .bar { height:6px; background:#333; border-radius:3px; margin:10px 0; overflow:hidden; }
 .bar > div { height:100%; background:var(--acc); width:0%; transition:width .5s; border-radius:3px; }
+.job.uploading .bar > div { width:100%; background:repeating-linear-gradient(110deg,var(--acc) 0 12px,#4a8dbd 12px 24px); background-size:51px 100%; animation:upload 1s linear infinite; }
+@keyframes upload { to { background-position:51px 0; } }
+@media (prefers-reduced-motion: reduce) { .job.uploading .bar > div { animation:none; } }
 .job.done .bar > div { background:var(--ok); }
 .job.error .st { color:var(--err); }
 .preview { font-size:14px; color:#bbb; max-height:7.5em; overflow:hidden; margin:8px 0; white-space:pre-wrap; }
@@ -44,12 +47,53 @@ drop.onclick = () => input.click();
 ['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.add('over');}));
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.remove('over');}));
 drop.addEventListener('drop', ev => [...ev.dataTransfer.files].forEach(send));
-input.onchange = () => [...input.files].forEach(send);
-async function send(file) {
+input.onchange = () => { [...input.files].forEach(send); input.value = ''; };
+function send(file) {
+  const el = document.createElement('div');
+  el.className = 'job uploading';
+  el.innerHTML = '<div class="top"><span class="name"></span><span class="st" role="status"></span></div><div class="bar"><div class="fill"></div></div>';
+  el.querySelector('.name').textContent = file.name;
+  const status = el.querySelector('.st'), fill = el.querySelector('.fill');
+  status.textContent = 'Загрузка на сервер…';
+  box.prepend(el);
+
+  const fail = message => {
+    el.className = 'job error';
+    fill.style.width = '0%';
+    status.textContent = 'Ошибка: ' + message;
+  };
+  const xhr = new XMLHttpRequest();
+  xhr.upload.onprogress = ev => {
+    if (!ev.lengthComputable || !ev.total) return;
+    const pct = Math.min(100, Math.round(ev.loaded / ev.total * 100));
+    fill.style.width = pct + '%';
+    status.textContent = 'Загрузка на сервер · ' + pct + '%';
+  };
+  xhr.upload.onload = () => {
+    fill.style.width = '100%';
+    status.textContent = 'Файл передан · ожидаю сервер…';
+  };
+  xhr.onload = () => {
+    if (xhr.status < 200 || xhr.status >= 300) {
+      fail(xhr.responseText || 'сервер вернул код ' + xhr.status);
+      return;
+    }
+    let job;
+    try {
+      job = JSON.parse(xhr.responseText);
+      if (!job || !job.id) throw new Error('missing job id');
+    } catch {
+      fail('некорректный ответ сервера');
+      return;
+    }
+    render(job);
+    el.remove();
+  };
+  xhr.onerror = () => fail('не удалось загрузить файл. Проверь соединение и попробуй снова.');
+  xhr.onabort = () => fail('загрузка отменена');
   const fd = new FormData(); fd.append('f', file);
-  const r = await fetch('/upload', {method:'POST', body:fd});
-  if (!r.ok) { alert('Ошибка: ' + await r.text()); return; }
-  render(await r.json());
+  xhr.open('POST', '/upload');
+  xhr.send(fd);
 }
 document.getElementById('go').onclick = async () => {
   const url = document.getElementById('url').value.trim();
