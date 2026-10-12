@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import shutil
 import threading
 import uuid
 from pathlib import Path
@@ -29,6 +31,21 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 
 jobs: dict[str, Job] = {}
 engine: Engine | None = None
+workers: dict[str, threading.Thread] = {}
+delete_lock = threading.Lock()
+
+
+def start_job(job: Job, target):
+    def run():
+        try:
+            target()
+        finally:
+            with delete_lock:
+                workers.pop(job.id, None)
+
+    worker = threading.Thread(target=run, daemon=True)
+    workers[job.id] = worker
+    worker.start()
 
 
 def get_engine() -> Engine:
@@ -72,8 +89,7 @@ def upload(f: UploadFile):
     jid = dest.stem
     job = Job(id=jid, filename=f.filename or dest.name)
     jobs[jid] = job
-    threading.Thread(target=lambda: get_engine().run_job(job, str(dest)),
-                     daemon=True).start()
+    start_job(job, lambda: get_engine().run_job(job, str(dest)))
     return job_info(job)
 
 
@@ -88,7 +104,7 @@ def fetch(url: str = Form(...), browser: str | None = Form(None), cookie: str | 
     jid = uuid.uuid4().hex[:8]
     job = Job(id=jid, filename=url[:120])
     jobs[jid] = job
-    threading.Thread(target=lambda: run_url_job(job, url.strip(), DATA / jid, get_engine(), browser=browser, cookie=cookie), daemon=True).start()
+    start_job(job, lambda: run_url_job(job, url.strip(), DATA / jid, get_engine(), browser=browser, cookie=cookie))
     return job_info(job)
 
 
@@ -119,7 +135,34 @@ def job_shot(jid: str, name: str):
 
 @app.get("/jobs")
 def list_jobs():
-    return [job_info(j) for j in jobs.values()]
+    return [job_info(j) for j in list(jobs.values())]
+
+
+@app.delete("/jobs/{jid}", status_code=204)
+def delete_job(jid: str):
+    with delete_lock:
+        job = jobs.get(jid)
+        if not job:
+            raise HTTPException(404, "no such job")
+        worker = workers.get(jid)
+        # URL jobs briefly report done before writing slides and transcript.md.
+        if job.status not in ("done", "error") or (worker and worker.is_alive()):
+            raise HTTPException(409, "Задача ещё выполняется. Попробуй удалить её позже.")
+        if not re.fullmatch(r"[0-9a-f]{8}", jid):
+            raise HTTPException(400, "bad job id")
+        try:
+            try:
+                shutil.rmtree(DATA / jid)
+            except FileNotFoundError:
+                pass
+            for ext in AUDIO_EXTS:
+                (DATA / f"{jid}{ext}").unlink(missing_ok=True)
+        except OSError:
+            logger.exception("could not delete files for job %s", jid)
+            raise HTTPException(500, "Не удалось удалить файлы задачи. Попробуй снова.")
+        del jobs[jid]
+        workers.pop(jid, None)
+    return Response(status_code=204)
 
 
 @app.get("/jobs/{jid}")
